@@ -17,12 +17,13 @@ module HW6.T1
 
 import           Control.Concurrent.Classy          (MonadConc, STM, atomically)
 import           Control.Concurrent.Classy.STM      (TArray, TVar, newTVar)
-import           Control.Concurrent.Classy.STM.TVar (readTVar)
+import           Control.Concurrent.Classy.STM.TVar (readTVar, modifyTVar)
 import           Control.Monad.STM.Class            (MonadSTM)
 import           Data.Array.Base                    (MArray, getNumElements,
                                                      newArray, readArray,
                                                      writeArray)
 import           Data.Hashable                      (Hashable, hash)
+import Control.Monad (when)
 
 initCapacity :: Int
 initCapacity = 16
@@ -40,7 +41,7 @@ data CHT stm k v = CHT
 
 newCHT :: MonadConc m => m (CHT (STM m) k v)
 newCHT = atomically do
-  size <- newTVar initCapacity
+  size <- newTVar 0
   arr <- newArray (0, initCapacity - 1) []
   buckets <- newTVar arr
 
@@ -90,6 +91,7 @@ putCHT
 putCHT key val cht = atomically do
   (arr, bucketId, bucket) <- extractBucket key cht
   let (prefix, suffix) = span ((/= key) . fst) bucket
+  when (null suffix) $ modifyTVar (chtSize cht) (+ 1)
   writeArray arr bucketId $ (key, val) : prefix ++ drop 1 suffix
 
 sizeCHT :: MonadConc m => CHT (STM m) k v -> m Int
