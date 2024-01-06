@@ -90,7 +90,7 @@ putCHT key val cht = atomically do
 
     when (fromIntegral (oldSize + 1) >= fromIntegral oldCapacity * loadFactor) do
       let newCapacity = oldCapacity * 2
-      newArr <- newArray (0, newCapacity) []
+      newArr <- newArray (0, newCapacity - 1) []
       arrLst <- getElems arr
       for_ arrLst $ \i ->
         for_ i $ \(key', val') -> do
