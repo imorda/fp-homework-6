@@ -1,6 +1,4 @@
-{-# LANGUAGE BlockArguments   #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeFamilies     #-}
+{-# LANGUAGE BlockArguments #-}
 
 module HW6.T1
   ( BucketsArray
@@ -17,13 +15,13 @@ module HW6.T1
 
 import           Control.Concurrent.Classy          (MonadConc, STM, atomically)
 import           Control.Concurrent.Classy.STM      (TArray, TVar, newTVar)
-import           Control.Concurrent.Classy.STM.TVar (readTVar, modifyTVar)
-import           Control.Monad.STM.Class            (MonadSTM)
-import           Data.Array.Base                    (MArray, getNumElements,
-                                                     newArray, readArray,
-                                                     writeArray)
+import           Control.Concurrent.Classy.STM.TVar (readTVar, writeTVar)
+import           Control.Monad                      (when)
+import           Data.Array.Base                    (MArray, getElems,
+                                                     getNumElements, newArray,
+                                                     readArray, writeArray)
+import           Data.Foldable                      (for_)
 import           Data.Hashable                      (Hashable, hash)
-import Control.Monad (when)
 
 initCapacity :: Int
 initCapacity = 16
@@ -50,22 +48,13 @@ newCHT = atomically do
     , chtSize = size
     }
 
-extractBucket
-  :: ( Hashable a
-     , Control.Monad.STM.Class.MonadSTM m
-     , MArray (TArray stm) (Bucket k v) m
-     , TVar stm ~ TVar m
-     )
-  => a
-  -> CHT stm k v
-  -> m (TArray stm Int (Bucket k v), Int, Bucket k v)
-extractBucket key cht = do
+extractBucket :: (MArray a b m, Hashable k) => k -> a Int b -> m (Int, b)
+extractBucket key arr = do
   let keyHash = hash key
-  arr <- readTVar $ chtBuckets cht
   capacity <- getNumElements arr
   let bucketId = keyHash `mod` capacity
   bucket <- readArray arr bucketId
-  return (arr, bucketId, bucket)
+  return (bucketId, bucket)
 
 getCHT
   :: ( MonadConc m
@@ -76,7 +65,8 @@ getCHT
   -> CHT (STM m) k v
   -> m (Maybe v)
 getCHT key cht = atomically do
-  (_, _, bucket) <- extractBucket key cht
+  arr <- readTVar $ chtBuckets cht
+  (_, bucket) <- extractBucket key arr
   return $ lookup key bucket
 
 putCHT
@@ -89,10 +79,24 @@ putCHT
   -> CHT (STM m) k v
   -> m ()
 putCHT key val cht = atomically do
-  (arr, bucketId, bucket) <- extractBucket key cht
+  arr <- readTVar $ chtBuckets cht
+  (bucketId, bucket) <- extractBucket key arr
   let (prefix, suffix) = span ((/= key) . fst) bucket
-  when (null suffix) $ modifyTVar (chtSize cht) (+ 1)
   writeArray arr bucketId $ (key, val) : prefix ++ drop 1 suffix
+  when (null suffix) do
+    oldSize <- readTVar $ chtSize cht
+    writeTVar (chtSize cht) $ oldSize + 1
+    oldCapacity <- getNumElements arr
+
+    when (fromIntegral (oldSize + 1) >= fromIntegral oldCapacity * loadFactor) do
+      let newCapacity = oldCapacity * 2
+      newArr <- newArray (0, newCapacity) []
+      arrLst <- getElems arr
+      for_ arrLst $ \i ->
+        for_ i $ \(key', val') -> do
+          (bucketId', bucket') <- extractBucket key' newArr
+          writeArray newArr bucketId' $ (key', val') : bucket'
+      writeTVar (chtBuckets cht) newArr
 
 sizeCHT :: MonadConc m => CHT (STM m) k v -> m Int
 sizeCHT cht = atomically $ readTVar $ chtSize cht
