@@ -51,6 +51,7 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - hw6
+    - optparse-applicative
 
 tests:
   hw6-test:
